@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agro - San Andres</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🌱 Agro San Andres</h1>
+    <p id="ultima-actualizacion">Cargando...</p>
+  </header>
+
+  <main>
+    <section class="card" id="card-dht11">
+      <h2>🌡 Temperatura y Humedad</h2>
+      <div class="dato-principal">
+        <span id="temp-valor">--</span><span class="unidad">°C</span>
+      </div>
+      <div class="dato-secundario">
+        Humedad: <span id="hum-valor">--</span>%
+      </div>
+      <div class="timestamp" id="dht11-timestamp">--</div>
+    </section>
+
+    <section class="card" id="card-bmp180">
+      <h2>📊 Presion Atmosferica</h2>
+      <div class="dato-principal">
+        <span id="presion-valor">--</span><span class="unidad">hPa</span>
+      </div>
+      <div class="dato-secundario">
+        Temp: <span id="bmp-temp-valor">--</span>°C |
+        Altitud: <span id="altitud-valor">--</span>m
+      </div>
+      <div class="timestamp" id="bmp180-timestamp">--</div>
+    </section>
+
+    <section class="card" id="card-estado">
+      <h2>📡 Estado del dispositivo</h2>
+      <div class="estado-item">
+        <span class="label">Nombre:</span>
+        <span id="estado-nombre">--</span>
+      </div>
+      <div class="estado-item">
+        <span class="label">Modo:</span>
+        <span id="estado-modo">--</span>
+      </div>
+      <div class="estado-item">
+        <span class="label">Red:</span>
+        <span id="estado-red">--</span>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Proyecto Agro - San Andres</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
