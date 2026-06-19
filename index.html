@@ -1,65 +1,312 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Agro - San Andres</title>
-  <link rel="stylesheet" href="style.css">
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#2d6a4f">
-  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agro Campo — Monitor Climático</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="theme-color" content="#0b1120" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <link rel="stylesheet" href="/css/app.css" />
+
+  <script type="module">
+    // ── Importar módulos ─────────────────────────────────────────────────
+    import { db, ref, onValue, query, orderByKey, limitToLast, get, estado }
+      from '/js/firebase.js';
+    import { parseKey, filtrarPorHoras }   from '/js/utils.js';
+    import { renderDashboard }             from '/js/dashboard.js';
+    import { actualizarHistoricos }        from '/js/historicos.js';
+    import { renderAnalisis }              from '/js/analisis.js';
+    import { verificarAlertas, renderAlertas, initFormUmbrales } from '/js/alertas.js';
+
+    // ── Cargar historial desde Firebase ─────────────────────────────────
+    async function cargarHistorial(horas) {
+      const limite = horas === 6 ? 100 : horas === 12 ? 200 : 400;
+
+      const snapBmp = await get(query(ref(db, '/sensores/bmp180/historial'), orderByKey(), limitToLast(limite)));
+      estado.bmpHist = [];
+      if (snapBmp.exists()) {
+        snapBmp.forEach(child => {
+          const v = child.val();
+          estado.bmpHist.push({ ts: parseKey(child.key), presion: v.presion, temperatura: v.temperatura, altitud: v.altitud });
+        });
+        estado.bmpHist.sort((a, b) => a.ts - b.ts);
+      }
+
+      const snapDht = await get(query(ref(db, '/sensores/dht11/historial'), orderByKey(), limitToLast(limite)));
+      estado.dhtHist = [];
+      if (snapDht.exists()) {
+        snapDht.forEach(child => {
+          const v = child.val();
+          estado.dhtHist.push({ ts: parseKey(child.key), temperatura: v.temperatura, humedad: v.humedad });
+        });
+        estado.dhtHist.sort((a, b) => a.ts - b.ts);
+      }
+
+      actualizarHistoricos(horas);
+    }
+
+    // ── Escuchar última lectura en tiempo real ───────────────────────────
+    onValue(ref(db, '/sensores/bmp180/ultima_lectura'), snap => {
+      estado.ultimoBmp = snap.val();
+      renderDashboard();
+      verificarAlertas();
+      if (estado.ultimoBmp) {
+        estado.bmpHist.push({ ts: new Date(), ...estado.ultimoBmp });
+        if (estado.bmpHist.length > 500) estado.bmpHist.shift();
+      }
+    });
+
+    onValue(ref(db, '/sensores/dht11/ultima_lectura'), snap => {
+      estado.ultimoDht = snap.val();
+      renderDashboard();
+      verificarAlertas();
+      if (estado.ultimoDht) {
+        estado.dhtHist.push({ ts: new Date(), ...estado.ultimoDht });
+        if (estado.dhtHist.length > 500) estado.dhtHist.shift();
+      }
+    });
+
+    // ── Navegación ───────────────────────────────────────────────────────
+    function showSection(id) {
+      document.querySelectorAll('.seccion').forEach(s => s.classList.add('hidden'));
+      document.getElementById(id)?.classList.remove('hidden');
+      document.querySelectorAll('.nav-btn').forEach(b =>
+        b.classList.toggle('active-nav', b.dataset.sec === id)
+      );
+
+      if (id === 'sec-historicos') {
+        const horas = parseInt(document.getElementById('sel-horas')?.value || 12);
+        cargarHistorial(horas);
+      }
+      if (id === 'sec-analisis') {
+        if (estado.bmpHist.length < 3) cargarHistorial(12).then(renderAnalisis);
+        else renderAnalisis();
+      }
+      if (id === 'sec-alertas') renderAlertas();
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      initFormUmbrales();
+
+      document.querySelectorAll('.nav-btn').forEach(btn =>
+        btn.addEventListener('click', () => showSection(btn.dataset.sec))
+      );
+
+      document.getElementById('sel-horas')?.addEventListener('change', e =>
+        cargarHistorial(parseInt(e.target.value))
+      );
+
+      showSection('sec-dashboard');
+    });
+  </script>
 </head>
-<body>
-  <header>
-    <h1>🌱 Agro San Andres</h1>
-    <p id="ultima-actualizacion">Cargando...</p>
+
+<body class="min-h-screen">
+
+  <!-- Toast -->
+  <div id="toast" class="fixed top-4 right-4 z-50 bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg pointer-events-none"></div>
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-xl">🌾</span>
+        <span class="font-semibold text-slate-100 text-sm tracking-wide">Agro Campo</span>
+        <span class="text-slate-600 text-xs hidden sm:block">Monitor Climático</span>
+      </div>
+      <div id="dash-hora" class="text-xs text-slate-500 mono"></div>
+    </div>
   </header>
 
-  <main>
-    <section class="card" id="card-dht11">
-      <h2>🌡 Temperatura y Humedad</h2>
-      <div class="dato-principal">
-        <span id="temp-valor">--</span><span class="unidad">°C</span>
+  <!-- Nav -->
+  <nav class="border-b border-slate-800 bg-slate-900/60 sticky top-14 z-30">
+    <div class="max-w-6xl mx-auto px-3 sm:px-6">
+      <div class="flex gap-1 py-2 overflow-x-auto">
+        <button class="nav-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 whitespace-nowrap" data-sec="sec-dashboard">
+          <span>📊</span> Dashboard
+        </button>
+        <button class="nav-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 whitespace-nowrap" data-sec="sec-historicos">
+          <span>📈</span> Históricos
+        </button>
+        <button class="nav-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 whitespace-nowrap" data-sec="sec-analisis">
+          <span>🌦️</span> Análisis
+        </button>
+        <button class="nav-btn relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 whitespace-nowrap" data-sec="sec-alertas">
+          <span>🔔</span> Alertas
+          <span id="badge-alertas" class="hidden absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold"></span>
+        </button>
+        <button class="nav-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-slate-400 whitespace-nowrap" data-sec="sec-dispositivo">
+          <span>🔧</span> Dispositivo
+        </button>
+        <!-- Agregar nuevas secciones acá con un botón nuevo -->
       </div>
-      <div class="dato-secundario">
-        Humedad: <span id="hum-valor">--</span>%
+    </div>
+  </nav>
+
+  <main class="max-w-6xl mx-auto px-3 sm:px-6 py-5">
+
+    <!-- ── DASHBOARD ──────────────────────────────────────────────────── -->
+    <section id="sec-dashboard" class="seccion">
+      <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">Lectura actual</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+
+        <div class="card-sensor sm:col-span-2 lg:col-span-1 bg-gradient-to-br from-indigo-950/80 to-slate-900 border border-indigo-800/40 rounded-2xl p-4 sm:p-5">
+          <p class="text-xs text-indigo-300/70 uppercase tracking-wider mb-2">Presión</p>
+          <p class="mono text-5xl font-bold text-indigo-200"><span id="dash-presion">--</span></p>
+          <p class="text-xs text-slate-500 mt-1">hPa</p>
+          <p id="dash-tendencia" class="text-xs font-medium mt-2 text-slate-400">--</p>
+        </div>
+
+        <div class="card-sensor bg-gradient-to-br from-orange-950/80 to-slate-900 border border-orange-800/40 rounded-2xl p-4 sm:p-5">
+          <p class="text-xs text-orange-300/70 uppercase tracking-wider mb-2">Temp BMP180</p>
+          <p class="mono text-5xl font-bold text-orange-200"><span id="dash-temp-bmp">--</span></p>
+          <p class="text-xs text-slate-500 mt-1">°C</p>
+        </div>
+
+        <div class="card-sensor bg-gradient-to-br from-slate-800/80 to-slate-900 border border-slate-700/40 rounded-2xl p-4 sm:p-5">
+          <p class="text-xs text-slate-400/70 uppercase tracking-wider mb-2">Altitud</p>
+          <p class="mono text-5xl font-bold text-slate-200"><span id="dash-altitud">--</span></p>
+          <p class="text-xs text-slate-500 mt-1">m s.n.m.</p>
+        </div>
+
+        <div class="card-sensor bg-gradient-to-br from-emerald-950/80 to-slate-900 border border-emerald-800/40 rounded-2xl p-4 sm:p-5">
+          <p class="text-xs text-emerald-300/70 uppercase tracking-wider mb-2">Humedad</p>
+          <p class="mono text-5xl font-bold text-emerald-200"><span id="dash-humedad">--</span></p>
+          <p class="text-xs text-slate-500 mt-1">% · DHT11</p>
+          <p id="dash-interp-hum" class="text-xs font-medium mt-2 text-slate-400">--</p>
+        </div>
+
+        <div class="card-sensor bg-gradient-to-br from-pink-950/80 to-slate-900 border border-pink-800/40 rounded-2xl p-4 sm:p-5">
+          <p class="text-xs text-pink-300/70 uppercase tracking-wider mb-2">Temp DHT11</p>
+          <p class="mono text-5xl font-bold text-pink-200"><span id="dash-temp-dht">--</span></p>
+          <p class="text-xs text-slate-500 mt-1">°C</p>
+        </div>
+
       </div>
-      <div class="timestamp" id="dht11-timestamp">--</div>
+      <p class="text-xs text-slate-600 text-center">Los datos se actualizan automáticamente en tiempo real.</p>
     </section>
 
-    <section class="card" id="card-bmp180">
-      <h2>📊 Presion Atmosferica</h2>
-      <div class="dato-principal">
-        <span id="presion-valor">--</span><span class="unidad">hPa</span>
+    <!-- ── HISTÓRICOS ─────────────────────────────────────────────────── -->
+    <section id="sec-historicos" class="seccion hidden">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest">Históricos</h2>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-slate-500">Ver últimas:</label>
+          <select id="sel-horas">
+            <option value="6">6 horas</option>
+            <option value="12" selected>12 horas</option>
+            <option value="24">24 horas</option>
+          </select>
+        </div>
       </div>
-      <div class="dato-secundario">
-        Temp: <span id="bmp-temp-valor">--</span>°C |
-        Altitud: <span id="altitud-valor">--</span>m
+      <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 mb-4">
+        <p class="text-xs text-slate-400 mb-3 font-medium">Presión + Temperatura BMP180</p>
+        <div class="chart-wrap"><canvas id="chartPresion"></canvas></div>
       </div>
-      <div class="timestamp" id="bmp180-timestamp">--</div>
+      <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+        <p class="text-xs text-slate-400 mb-3 font-medium">Temperatura y Humedad (DHT11 vs BMP180)</p>
+        <div class="chart-wrap"><canvas id="chartTempHum"></canvas></div>
+      </div>
     </section>
 
-    <section class="card" id="card-estado">
-      <h2>📡 Estado del dispositivo</h2>
-      <div class="estado-item">
-        <span class="label">Nombre:</span>
-        <span id="estado-nombre">--</span>
-      </div>
-      <div class="estado-item">
-        <span class="label">Modo:</span>
-        <span id="estado-modo">--</span>
-      </div>
-      <div class="estado-item">
-        <span class="label">Red:</span>
-        <span id="estado-red">--</span>
+    <!-- ── ANÁLISIS ───────────────────────────────────────────────────── -->
+    <section id="sec-analisis" class="seccion hidden">
+      <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">Análisis del tiempo</h2>
+      <div id="analisis-cont">
+        <p class="text-slate-500 text-sm">Cargando datos...</p>
       </div>
     </section>
+
+    <!-- ── ALERTAS ────────────────────────────────────────────────────── -->
+    <section id="sec-alertas" class="seccion hidden">
+      <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">Alertas y Umbrales</h2>
+      <div class="mb-6">
+        <p class="text-xs text-slate-500 mb-3">Estado actual</p>
+        <div id="alertas-lista" class="space-y-2">
+          <p class="text-slate-500 text-sm">Cargando...</p>
+        </div>
+      </div>
+      <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+        <p class="text-xs text-slate-400 font-medium mb-4 uppercase tracking-wider">Configurar umbrales</p>
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="text-xs text-slate-500 block mb-1">Presión mín (hPa)</label><input type="number" id="u-pres-min" step="0.5" /></div>
+          <div><label class="text-xs text-slate-500 block mb-1">Presión máx (hPa)</label><input type="number" id="u-pres-max" step="0.5" /></div>
+          <div><label class="text-xs text-slate-500 block mb-1">Temp mín (°C)</label><input type="number" id="u-temp-min" step="0.5" /></div>
+          <div><label class="text-xs text-slate-500 block mb-1">Temp máx (°C)</label><input type="number" id="u-temp-max" step="0.5" /></div>
+          <div><label class="text-xs text-slate-500 block mb-1">Humedad mín (%)</label><input type="number" id="u-hum-min" min="0" max="100" /></div>
+          <div><label class="text-xs text-slate-500 block mb-1">Humedad máx (%)</label><input type="number" id="u-hum-max" min="0" max="100" /></div>
+        </div>
+        <button id="btn-guardar-umbrales" class="mt-5 w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">
+          Guardar umbrales
+        </button>
+      </div>
+    </section>
+
+    <!-- ── DISPOSITIVO ────────────────────────────────────────────────── -->
+    <section id="sec-dispositivo" class="seccion hidden">
+      <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">Dispositivo y Bot</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider font-medium mb-4">Sensores</p>
+          <div class="space-y-3">
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-slate-300">BMP180</span>
+              <span class="text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-700/40 px-2 py-0.5 rounded-full">Presión · Temp · Altitud</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-slate-300">DHT11</span>
+              <span class="text-xs bg-sky-900/50 text-sky-400 border border-sky-700/40 px-2 py-0.5 rounded-full">Temp · Humedad</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider font-medium mb-4">Firebase</p>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span class="text-xs mono text-slate-400">/sensores/bmp180/historial</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span class="text-xs mono text-slate-400">/sensores/dht11/historial</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span>
+              <span class="text-xs mono text-slate-400">Tiempo real: ultima_lectura</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="md:col-span-2 bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+          <p class="text-xs text-slate-400 uppercase tracking-wider font-medium mb-2">Proyecto</p>
+          <p class="text-xs mono text-slate-500">agro-campo-a9633 · Firebase Hosting</p>
+          <p class="text-xs text-slate-600 mt-3">Los umbrales se guardan localmente en el navegador.</p>
+        </div>
+      </div>
+    </section>
+
+    <!--
+      ── NUEVA SECCIÓN (ejemplo) ────────────────────────────────────────
+      Para agregar una sección nueva:
+      1. Copiar este bloque y cambiar el id
+      2. Agregar el botón en el <nav> arriba
+      3. Crear /js/nueva-seccion.js
+      4. Importarlo en el bloque <script type="module"> arriba
+    -->
+
   </main>
 
-  <footer>
-    <p>Proyecto Agro - San Andres</p>
-  </footer>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
 
-  <script src="app.js"></script>
 </body>
 </html>
